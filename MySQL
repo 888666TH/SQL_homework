@@ -1,0 +1,108 @@
+CREATE DATABASE IF NOT EXISTS restaurant_db;
+USE restaurant_db;
+
+CREATE TABLE menu 
+(
+    dish_id INT PRIMARY KEY AUTO_INCREMENT,
+    dish_name VARCHAR(50) NOT NULL,
+    price DECIMAL(10,2) NOT NULL,
+    description TEXT,
+    profit_per_dish DECIMAL(10,2)
+);
+
+CREATE TABLE orders 
+(
+    item_id INT AUTO_INCREMENT PRIMARY KEY,  
+    order_id VARCHAR(20) NOT NULL,           
+    order_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    table_id INT NOT NULL COMMENT '桌号',
+    dish_id INT COMMENT '菜品ID',
+    quantity INT NOT NULL COMMENT '数量',
+    subtotal DECIMAL(10,2) NOT NULL COMMENT '小计',
+    profit DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '单份利润', 
+    create_date DATE NOT NULL DEFAULT (CURRENT_DATE()), 
+    FOREIGN KEY (dish_id) REFERENCES menu(dish_id),
+    INDEX idx_order_time (order_time),
+    INDEX idx_create_date (create_date),
+    INDEX idx_order_id (order_id)  
+);
+
+CREATE TABLE sales_statistics 
+(
+    dish_id INT PRIMARY KEY,
+    total_sales INT NOT NULL DEFAULT 0,
+    total_revenue DECIMAL(10,2) NOT NULL DEFAULT 0,
+    total_profit DECIMAL(10,2) NOT NULL DEFAULT 0,
+    FOREIGN KEY (dish_id) REFERENCES menu(dish_id)
+);
+
+DELIMITER $$
+CREATE TRIGGER after_menu_insert
+AFTER INSERT ON menu
+FOR EACH ROW
+BEGIN
+    INSERT INTO sales_statistics (dish_id, total_sales, total_revenue, total_profit) 
+    VALUES (NEW.dish_id, 0, 0, 0);
+END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER update_sales_trigger
+AFTER INSERT ON orders
+FOR EACH ROW
+BEGIN
+    UPDATE sales_statistics
+    SET total_sales = total_sales + NEW.quantity,
+        total_revenue = total_revenue + NEW.subtotal,
+        total_profit = total_profit + NEW.profit
+    WHERE dish_id = NEW.dish_id;
+END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER update_order_profit
+BEFORE INSERT ON orders
+FOR EACH ROW
+BEGIN
+    SET NEW.profit = (
+        SELECT profit_per_dish FROM menu WHERE dish_id = NEW.dish_id
+    ) * NEW.quantity;
+END$$
+DELIMITER ;
+ 
+DELIMITER $$
+CREATE TRIGGER before_menu_delete
+BEFORE DELETE ON menu
+FOR EACH ROW
+BEGIN
+    UPDATE orders SET dish_id = NULL WHERE dish_id = OLD.dish_id;
+    DELETE FROM sales_statistics WHERE dish_id = OLD.dish_id;
+END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE PROCEDURE update_menu_price(
+    IN p_dish_id INT,
+    IN p_new_price DECIMAL(10,2)
+)
+BEGIN
+    IF p_new_price <= 0 THEN
+        SIGNAL SQLSTATE '45000';
+    END IF;
+    
+    UPDATE menu SET price = p_new_price WHERE dish_id = p_dish_id;
+END$$
+DELIMITER ;
+
+CREATE OR REPLACE VIEW total_restaurant_profit AS
+SELECT SUM(profit) AS total_profit FROM orders;
+
+INSERT INTO menu (dish_name, price, profit_per_dish, description) VALUES
+('宫保鸡丁', 38.00, 15.00, '传统川菜，鸡肉鲜嫩，花生酥脆'),
+('鱼香肉丝', 36.00, 14.00, '酸甜可口，具有鱼香味但不含鱼肉'),
+('糖醋排骨', 42.00, 18.00, '色泽红亮，酸甜开胃'),
+('麻婆豆腐', 18.00, 8.00, '麻辣鲜香，豆腐嫩滑'),
+('龙井虾仁', 68.00, 30.00, '浙菜经典，虾仁鲜嫩配以龙井茶清香'),
+('扬州炒饭', 28.00, 12.00, '配料丰富，口感多样'),
+('西湖牛肉羹', 22.00, 10.00, '细腻滑嫩，营养丰富'),
+('珍珠奶茶', 12.00, 6.00, 'Q弹珍珠配以浓郁奶茶');  
